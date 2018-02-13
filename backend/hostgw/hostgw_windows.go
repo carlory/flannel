@@ -18,6 +18,7 @@ package hostgw
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"sync"
 
@@ -60,12 +61,7 @@ func New(sm subnet.Manager, extIface *backend.ExternalInterface) (backend.Backen
 }
 
 func (be *HostgwBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
-	n := &network{
-		extIface:  be.extIface,
-		sm:        be.sm,
-		name:      be.extIface.Iface.Name,
-		linkIndex: be.extIface.Iface.Index,
-	}
+	n := &network{sm: be.sm}
 
 	attrs := subnet.LeaseAttrs{
 		PublicIP:    ip.FromIP(be.extIface.ExtAddr),
@@ -151,9 +147,8 @@ func (be *HostgwBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup,
 		if err != nil {
 			return nil, fmt.Errorf("unable to create network [%v], error: %v", backendConfig.networkName, err)
 		}
-
+		networkId = newHnsNetwork.Id
 		hnsNetwork = newHnsNetwork
-		networkId = hnsNetwork.Id
 		glog.Infof("Created HNS network [%v] as %+v", backendConfig.networkName, hnsNetwork)
 	}
 
@@ -210,6 +205,19 @@ func (be *HostgwBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup,
 		}
 		glog.Infof("Enabled forwarding on [%v] index [%v]", netInterface.Name, interfaceIdx)
 	}
+
+	// fix extIface
+	ifaceDetails, err := netHelper.GetInterfaceByIP(hnsNetwork.ManagementIP)
+	if err != nil {
+		return nil, err
+	}
+	iface, err := net.InterfaceByName(ifaceDetails.Name)
+	if err != nil {
+		return nil, err
+	}
+	n.extIface = &backend.ExternalInterface{Iface: iface, ExtAddr: be.extIface.ExtAddr, IfaceAddr: be.extIface.IfaceAddr}
+	n.name = iface.Name
+	n.linkIndex = iface.Index
 
 	return n, nil
 }
